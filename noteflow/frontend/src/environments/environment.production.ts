@@ -1,4 +1,4 @@
 export const environment = {
   production: true,
-  apiUrl: '' // Will be set via nginx proxy in production
+  apiUrl: 'https://noteflow-backend-tvn3.onrender.com'
 };
