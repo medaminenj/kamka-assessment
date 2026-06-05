@@ -1,0 +1,82 @@
+# ===========================
+# NoteFlow — GitLab CI/CD
+# ===========================
+
+stages:
+  - test
+  - build
+  - push
+  - deploy
+
+variables:
+  REGISTRY: registry.gitlab.com/medaminenj/noteflow
+  BACKEND_IMAGE: $REGISTRY/backend
+  FRONTEND_IMAGE: $REGISTRY/frontend
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+
+# ===========================
+# TEST
+# ===========================
+test-backend:
+  stage: test
+  image: maven:3.9-eclipse-temurin-17-alpine
+  script:
+    - cd backend
+    - mvn test -q
+  only:
+    - main
+    - merge_requests
+
+# ===========================
+# BUILD & PUSH — Backend
+# ===========================
+build-backend:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - docker build -t $BACKEND_IMAGE:$CI_COMMIT_SHORT_SHA -t $BACKEND_IMAGE:latest ./backend
+    - docker push $BACKEND_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $BACKEND_IMAGE:latest
+  only:
+    - main
+
+# ===========================
+# BUILD & PUSH — Frontend
+# ===========================
+build-frontend:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - docker build -t $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA -t $FRONTEND_IMAGE:latest ./frontend
+    - docker push $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $FRONTEND_IMAGE:latest
+  only:
+    - main
+
+# ===========================
+# DEPLOY — trigger Render
+# ===========================
+deploy-render:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      echo "Triggering Render deployment..."
+      curl -s -X POST "$RENDER_DEPLOY_HOOK_BACKEND" | grep -q "triggered" && echo "Backend deploy triggered"
+      curl -s -X POST "$RENDER_DEPLOY_HOOK_FRONTEND" | grep -q "triggered" && echo "Frontend deploy triggered"
+  only:
+    - main
+  needs:
+    - build-backend
+    - build-frontend
