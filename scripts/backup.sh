@@ -38,9 +38,18 @@ log "Starting database backup..."
 log "Backup file: ${BACKUP_FILE}"
 
 # Run mysqldump inside the container
+# Temporarily disable exit-on-error to handle mysqldump warning gracefully
+set +e
 docker exec "$CONTAINER_NAME" \
-  mysqldump -u root -p"${DATABASE_PASSWORD}" noteflow \
-  > "$BACKUP_FILE" 2>/dev/null
+  mysqldump -u root -p"${DATABASE_PASSWORD}" \
+  --no-tablespaces noteflow > "$BACKUP_FILE" 2>/tmp/mysqldump_err
+DUMP_EXIT=$?
+set -e
+
+if [ $DUMP_EXIT -ne 0 ]; then
+  cat /tmp/mysqldump_err >&2
+  error "mysqldump failed with exit code $DUMP_EXIT"
+fi
 
 # Verify backup was created and is not empty
 if [ ! -s "$BACKUP_FILE" ]; then
