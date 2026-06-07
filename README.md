@@ -9,41 +9,52 @@ A minimal 3-tier notes application built as a vehicle to demonstrate a complete 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        CI/CD Flow                           │
-│  git push → GitHub Actions → Build Images → Push to GHCR   │
-│                                    ↓                        │
-│                         Trigger Render Deploy               │
-└─────────────────────────────────────────────────────────────┘
+[ LOCAL DEVELOPMENT STACK (Docker Compose) ]
+┌────────────────────────────────────────────────────────┐
+│  ┌──────────────┐      ┌──────────────┐                │
+│  │  Angular FE  │ ───> │ Spring Boot  │                │
+│  │  (Port 80)   │      │ API (8080)   │                │
+│  └──────────────┘      └──────┬───────┘                │
+│                               │                        │
+│  ┌──────────────┐             ▼                        │
+│  │   MySQL DB   │      ┌──────────────┐                │
+│  │ (Local Data) │      │  Prometheus  │ ──>  Grafana   │
+│  └──────────────┘      │ (Port 9090)  │     (Port 3000)│
+│                        └──────────────┘                │
+└────────────────────────────────────────────────────────┘
 
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│   Frontend   │    │   Backend    │    │   Database   │
-│   Angular    │───▶│ Spring Boot  │───▶│  PostgreSQL  │
-│    Nginx     │    │  Port 8080   │    │  (Render)    │
-│   Port 80    │    │              │    │              │
-└──────────────┘    └──────┬───────┘    └──────────────┘
-                           │
-                    ┌──────▼───────┐
-                    │  Prometheus  │
-                    │  Port 9090   │
-                    └──────┬───────┘
-                           │
-                    ┌──────▼───────┐
-                    │   Grafana    │
-                    │  Port 3000   │
-                    └──────────────┘
+[ CI/CD PIPELINE ]
+git push ──> GitHub Actions ──> Build & Push ──> GHCR
+                                                    │
+                                          (Deploy Hook)
+                                                    │
+                                                    ▼
+[ LIVE PRODUCTION ENVIRONMENT (Render Cloud) ]
+┌────────────────────────────────────────────────────────┐
+│  ┌──────────────────┐      ┌──────────────┐            │
+│  │   Render Proxy   │ ───> │  Angular FE  │            │
+│  │(SSL Termination) │      │ (Static/Prod)│            │
+│  └─────────┬────────┘      └──────┬───────┘            │
+│            │                      │                    │
+│            ▼                      ▼                    │
+│  ┌──────────────────┐      ┌──────────────┐            │
+│  │   Render Proxy   │ ───> │ Spring Boot  │            │
+│  │(SSL Termination) │      │  API (8080)  │            │
+│  └──────────────────┘      └──────┬───────┘            │
+│                                   ▼                    │
+│                            ┌──────────────┐            │
+│                            │  PostgreSQL  │            │
+│                            │  (Managed)   │            │
+│                            └──────────────┘            │
+└────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Stack
 
 | Layer | Local | Production (Render) |
 |-------|-------|---------------------|
 | Frontend | Angular 18 + Nginx (Dockerfile.dev) | Angular 18 + Nginx (Dockerfile) |
 | Backend | Spring Boot 3 + Java 17 | Spring Boot 3 + Java 17 |
 | Database | MySQL 8 (Docker container) | PostgreSQL 15 (Render managed) |
-| Monitoring | Prometheus + Grafana (docker-compose) | Render built-in metrics |
+| Monitoring | Prometheus + Grafana (docker-compose) | /actuator/health + /actuator/prometheus |
 | Registry | Local Docker images | GHCR (ghcr.io) |
 
 ---
@@ -62,7 +73,7 @@ git clone https://github.com/medaminenj/kamka-assessment.git
 cd kamka-assessment
 ```
 
-**2. Create your `.env` file**
+**2. Create your .env file**
 ```bash
 cp .env.example .env
 ```
@@ -128,20 +139,20 @@ File: `.github/workflows/ci-cd.yml`
 
 ```
 git push to main
-      ↓
+        ↓
 Test Backend (Maven tests)
-      ↓
+        ↓
 Build & Push Docker Images → GHCR
   ghcr.io/medaminenj/kamka-assessment/backend:latest
   ghcr.io/medaminenj/kamka-assessment/frontend:latest
-      ↓
+        ↓
 Deploy to Render (via deploy hooks)
 ```
 
 Pipeline stages:
-1. **test-backend** — runs Maven tests on every push
-2. **build-and-push** — builds Docker images, pushes to GitHub Container Registry
-3. **deploy** — triggers Render redeploy via webhook (main branch only)
+- `test-backend` — runs Maven tests on every push
+- `build-and-push` — builds Docker images, pushes to GitHub Container Registry
+- `deploy` — triggers Render redeploy via webhook (main branch only)
 
 ---
 
@@ -150,18 +161,17 @@ Pipeline stages:
 | Aspect | Local (dev) | Render (prod) |
 |--------|-------------|---------------|
 | Database | MySQL 8 in Docker | PostgreSQL 15 managed |
-| Frontend build | `--configuration development` (Dockerfile.dev) | `--configuration production` (Dockerfile) |
-| Backend URL | `http://localhost:8080` | `https://noteflow-backend-tvn3.onrender.com` |
-| Secrets | `.env` file | Render dashboard variables |
-| Monitoring | Prometheus + Grafana containers | Render built-in metrics |
-| Compose file | `docker-compose.yml` | `docker-compose.prod.yml` (reference) |
+| Frontend build | --configuration development (Dockerfile.dev) | --configuration production (Dockerfile) |
+| Backend URL | http://localhost:8080 | https://noteflow-backend-tvn3.onrender.com |
+| Secrets | .env file | Render dashboard variables |
+| Monitoring | Prometheus + Grafana containers | /actuator/health + /actuator/prometheus |
+| Compose file | docker-compose.yml | docker-compose.prod.yml (reference) |
 
 ---
 
 ## Monitoring & Health Checks
 
 Every service exposes a health check:
-
 - **Backend** → `/actuator/health` — Spring Boot Actuator, shows DB connection status
 - **Frontend** → `/health` — Nginx returns `ok`
 - **Database** → `mysqladmin ping` — configured in docker-compose healthcheck
@@ -171,20 +181,21 @@ Prometheus scrapes backend metrics every 10 seconds from `/actuator/prometheus`.
 To view metrics in Grafana:
 1. Open http://localhost:3000 (admin / admin123)
 2. Connections → Data sources → Add Prometheus → URL: `http://prometheus:9090`
-3. Dashboards → Import → ID `4701` → select Prometheus datasource
+3. Dashboards → New dashboard → Add visualization
+4. Select `prometheus` as data source → Metric: `jvm_memory_used_bytes` → Run queries
 
 ---
 
 ## Bash Scripts
 
-### Deploy script
+**Deploy script**
 ```bash
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
 ```
 Pulls latest images, restarts all containers, polls `/actuator/health` until UP, auto-rollbacks on failure.
 
-### Database backup
+**Database backup**
 ```bash
 chmod +x scripts/backup.sh
 ./scripts/backup.sh
@@ -196,7 +207,6 @@ Exports MySQL database to `./backups/noteflow_TIMESTAMP.sql`, keeps last 7 backu
 ## Production Deployment (Render)
 
 The stack is deployed on Render free tier:
-
 - **Frontend:** https://noteflow-frontend-hmf6.onrender.com
 - **Backend:** https://noteflow-backend-tvn3.onrender.com
 - **Database:** PostgreSQL on Render (Oregon region)
