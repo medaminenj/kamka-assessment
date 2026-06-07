@@ -78,7 +78,7 @@ jobs:
 
   # ===========================
   # DEPLOY TO RENDER
-  # ==========================
+  # ===========================
   deploy:
     name: Deploy to Render
     runs-on: ubuntu-latest
@@ -95,3 +95,19 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}"
           echo "Frontend deploy triggered"
+
+      - name: Verify Live Production Deployment Health
+        run: |
+          echo "Waiting for Render to cycle containers..."
+          sleep 30
+          for i in {1..6}; do
+            STATUS=$(curl -s https://noteflow-backend-tvn3.onrender.com/actuator/health | jq -r '.status' 2>/dev/null || echo "DOWN")
+            if [ "$STATUS" = "UP" ]; then
+              echo "Production API is verified UP and healthy!"
+              exit 0
+            fi
+            echo "Health check failed (Status: $STATUS). Retrying in 10 seconds..."
+            sleep 10
+          done
+          echo "Error: Production deployment failed health verification!"
+          exit 1
